@@ -6,6 +6,7 @@ import pandas as pd
 import os
 import time
 from bs4 import BeautifulSoup # <--- 新增这个库
+from streamlit_gsheets import GSheetsConnection #<--- 连接google sheets
 
 # --- 页面配置 ---
 st.set_page_config(page_title="AI Product Tool", layout="wide")
@@ -117,33 +118,61 @@ if start_btn and api_key:
         except Exception as e:
             st.error(f"解析失败: {e}")
 
-# --- 展示与保存 ---
+# --- 显示结果与保存 (增强版：CSV + Google Sheets) ---
 if st.session_state['extracted_data']:
     data = st.session_state['extracted_data']
     
-    # 展示图片效果
-    col_img, col_info = st.columns([1, 2])
-    with col_img:
+    # 1. 结果展示界面 (保持不变)
+    col_l, col_r = st.columns([1, 2])
+    with col_l:
         if data.get('hero_image'):
-            st.image(data['hero_image'], caption="自动抓取的封面图")
-        else:
-            st.info("未找到封面图")
+            st.image(data['hero_image'], caption="封面大图")
+        if data.get('logo_icon'):
+            st.image(data['logo_icon'], width=60, caption="Logo")
             
-    with col_info:
-        st.subheader(data.get('name'))
-        st.write(data.get('one_liner'))
-        st.json(data)
+    with col_r:
+        st.subheader(f"产品：{data.get('name')}")
+        st.info(f"简介：{data.get('one_liner')}")
+        st.write(f"**成本分析：** {data.get('cost_analysis')}")
+        st.write(f"**部署方法：** {data.get('deployment')}")
+        
+    st.divider()
 
-    # 保存按钮
-    if st.button("💾 保存到 CSV"):
-        csv_file = "ai_products_v2.csv" # 存个新文件
-        # 处理列表转字符串
-        if isinstance(data.get('tags'), list):
-            data['tags'] = ", ".join(data['tags'])
-            
-        new_row = pd.DataFrame([data])
-        if not os.path.isfile(csv_file):
-            new_row.to_csv(csv_file, index=False, encoding='utf-8-sig')
-        else:
-            new_row.to_csv(csv_file, mode='a', header=False, index=False, encoding='utf-8-sig')
-        st.toast("保存成功！包含图片链接！")
+    # 2. 保存模块：创建两个并排的按钮
+    col_save1, col_save2 = st.columns(2)
+
+    with col_save1:
+        # 原有的 CSV 保存
+        if st.button("💾 保存到本地 CSV"):
+            csv_file = "full_ai_database.csv"
+            df_row = pd.DataFrame([data])
+            if not os.path.isfile(csv_file):
+                df_row.to_csv(csv_file, index=False, encoding='utf-8-sig')
+            else:
+                df_row.to_csv(csv_file, mode='a', header=False, index=False, encoding='utf-8-sig')
+            st.toast("本地 CSV 已更新！")
+
+    with col_save2:
+        # 新增的 Google Sheets 保存
+        if st.button("🚀 同步到 Google Sheets"):
+            try:
+                # 建立连接 (前提是你已经按照上一步配置好了 Secrets 或 st.connection)
+                conn = st.connection("gsheets", type=GSheetsConnection)
+                
+                # 读取并追加
+                existing_data = conn.read()
+                new_row = pd.DataFrame([data])
+                updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+                
+                # 更新回云端
+                conn.update(data=updated_df)
+                st.success("云端表格同步成功！")
+            except Exception as e:
+                st.error("同步失败。请确保已安装 st-gsheets-connection 并在 Secrets 中配置了凭据。")
+                st.info("报错详情: " + str(e))
+
+    # 3. 历史记录预览 (保持不变)
+    if os.path.exists("full_ai_database.csv"):
+        st.subheader("📊 历史记录预览")
+        all_df = pd.read_csv("full_ai_database.csv")
+        st.dataframe(all_df)
