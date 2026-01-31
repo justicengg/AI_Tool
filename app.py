@@ -153,24 +153,38 @@ if st.session_state['extracted_data']:
             st.toast("本地 CSV 已更新！")
 
     with col_save2:
-        # 新增的 Google Sheets 保存
         if st.button("🚀 同步到 Google Sheets"):
             try:
-                # 建立连接 (前提是你已经按照上一步配置好了 Secrets 或 st.connection)
+                # 1. 建立连接
                 conn = st.connection("gsheets", type=GSheetsConnection)
                 
-                # 读取并追加
-                existing_data = conn.read()
-                new_row = pd.DataFrame([data])
-                updated_df = pd.concat([existing_data, new_row], ignore_index=True)
-                
-                # 更新回云端
-                conn.update(data=updated_df)
-                st.success("云端表格同步成功！")
-            except Exception as e:
-                st.error("同步失败。请确保已安装 st-gsheets-connection 并在 Secrets 中配置了凭据。")
-                st.info("报错详情: " + str(e))
+                # 2. 【核心修复】读取现有数据，必须加 ttl=0 禁用缓存，否则它可能一直读旧的空状态
+                try:
+                    existing_data = conn.read(ttl=0) 
+                    # 清理掉全空的行
+                    existing_data = existing_data.dropna(how='all')
+                except:
+                    # 如果是第一次运行或表是空的，创建一个空的 DataFrame
+                    existing_data = pd.DataFrame()
 
+                # 3. 准备新数据
+                new_row = pd.DataFrame([data])
+                
+                # 4. 合并数据：确保旧数据在上面，新数据在下面
+                if not existing_data.empty:
+                    updated_df = pd.concat([existing_data, new_row], ignore_index=True)
+                else:
+                    updated_df = new_row
+                
+                # 5. 【核心修复】更新回云端
+                # 使用完整的 updated_df 覆盖，并确保索引不会被写入
+                conn.update(data=updated_df)
+                
+                st.success(f"同步成功！目前共有 {len(updated_df)} 个产品。")
+                
+            except Exception as e:
+                st.error(f"同步失败：{e}")
+                
     # 3. 历史记录预览 (保持不变)
     if os.path.exists("full_ai_database.csv"):
         st.subheader("📊 历史记录预览")
