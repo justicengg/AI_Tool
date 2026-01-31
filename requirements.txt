@@ -3,3 +3,4 @@ pandas
 openai
 requests
 beautifulsoup4
+st-gsheets-connection
